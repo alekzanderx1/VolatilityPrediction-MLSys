@@ -75,44 +75,71 @@ class VolatilityPredictionFlow(FlowSpec):
 
     @step
     def prepare_train_and_test_dataset(self):
+        # Set Date as Index
         self.dataframe.Date = pd.to_datetime(dataframe.Date)
         self.dataframe = dataframe.set_index('Date')
         self.dataframe = dataframe.sort_index()
-        # Shift Volatility by 1 week as this the the target we will be predicting
+        # Shift Volatility forward by 1 week as this the the target we will be predicting
         self.dataframe['Volatility'] = self.dataframe.Volatility.shift(1)
         self.dataframe = self.dataframe.iloc[1: , :]
-        self.train, self.test = self.dataframe[0:1700], self.dataframe[1700:]
-        # TODO impute empty values
-        self.next(self.train_model)
+        # Move target column to end
+        volatility_column = self.dataframe.pop('Volatility')
+        self.dataframe.insert(len(self.dataframe.columns),"Volatility",volatility_column)
+        # TODO impute NaN values
+        # TODO convert Mcap to float
+        
+        # spilit into train and test sets
+        self.train, self.test = self.dataframe[0:1600], self.dataframe[1600:]
+        self.next(self.train_walk_forward_validation)
+        
 
     @step
-    def train_model(self):
+    def train_walk_forward_validation(self):
         """
         Train a regression on the training set
         """
         from sklearn.ensemble import RandomForestRegressor
-        self.X_train = self.train 
-        reg = RandomForestRegressor(n_estimators=100)
-        reg.fit(self.X_train, self.y_train)
-        # now, make sure the model is available downstream
-        self.model = reg
+        from numpy import asarray
+        
+        def random_forest_forecast(train, testX):
+            # transform list into array
+            train = asarray(train)
+            # split into input and output columns
+            trainX, trainy = train[:, :-1], train[:, -1]
+            # fit model
+            model = RandomForestRegressor(n_estimators=10)
+            model.fit(trainX, trainy)
+            # make a one-step prediction
+            yhat = model.predict([testX])
+            return yhat[0]
+        
+        predictions = list()
+        history = [x for x in self.train.values]
+        
+        for i in range(len(self.test)):
+            testX, testy = self.test.iloc[i].values[:-1], self.test.iloc[i].values[-1]
+            # fit model on history and make a prediction
+            yhat = random_forest_forecast(history, testX)
+            # store forecast in list of predictions
+            predictions.append(yhat)
+            # add actual observation to history for the next loop
+            history.append(test.iloc[i].values)
+            # summarize progress
+            print('>expected=%.1f, predicted=%.1f' % (testy, yhat))            
+        
+        self.y_predicted = predictions
         # go to the testing phase
-        self.next(self.test_model)
+        self.next(self.evaluate_results)
 
     @step 
-    def test_model(self):
+    def evaluate_results(self):
         """
-        Test the model on the hold out sample
+        Calculate resulting metrics from predictions 
         """
         from sklearn.ensemble import metrics
 
-        self.y_predicted = self.model.predict(self.X_test)
-        self.mse = metrics.mean_squared_error(self.y_test, self.y_predicted)
-        self.r2 = metrics.r2_score(self.y_test, self.y_predicted)
-        print('MSE is {}, R2 score is {}'.format(self.mse, self.r2))
-        # print out a test prediction
-        test_predictions = self.model.predict([[10]])
-        print("Test prediction is {}".format(test_predictions))
+        self.r2 = metrics.r2_score(self.test['Volatility'], self.y_predicted)
+        print('R2 score is {}'.format(self.r2))
         # all is done go to the end
         self.next(self.end)
 
