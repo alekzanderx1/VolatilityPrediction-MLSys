@@ -1,12 +1,5 @@
 """
 
-Simple stand-alone script showing end-to-end training of a regression model using Metaflow. 
-This script ports the composable script into an explicit dependency graphg (using Metaflow syntax)
-and highlights the advantages of doing so. This script has been created for pedagogical purposes, 
-and it does NOT necessarely reflect all best practices.
-
-Please refer to the slides and our discussion for further context.
-
 MAKE SURE TO RUN THIS WITH METAFLOW LOCAL FIRST
 
 """
@@ -22,10 +15,10 @@ assert os.environ.get('METAFLOW_DEFAULT_DATASTORE', 'local') == 'local'
 assert os.environ.get('METAFLOW_DEFAULT_ENVIRONMENT', 'local') == 'local'
 
 
-class MyRegressionFlow(FlowSpec):
+class VolatilityPredictionFlow(FlowSpec):
     """
-    MyRegressionFlow is a minimal DAG showcasing reading data from a file 
-    and training a model successfully.
+    VolatilityPredictionFlow is a DAG reading data from a file 
+    and training a Regression model successfully.
     """
     
     # if a static file is part of the flow, 
@@ -36,7 +29,7 @@ class MyRegressionFlow(FlowSpec):
         'dataset',
         help='Text file with the dataset',
         is_text=True,
-        default='regression_dataset.txt')
+        default='csv_dataset.csv')
 
     TEST_SPLIT = Parameter(
         name='test_split',
@@ -63,13 +56,11 @@ class MyRegressionFlow(FlowSpec):
         Read the data in from the static file
         """
         from io import StringIO
-
-        raw_data = StringIO(self.DATA_FILE).readlines()
-        print("Total of {} rows in the dataset!".format(len(raw_data)))
-        self.dataset = [[float(_) for _ in d.strip().split('\t')] for d in raw_data]
-        print("Raw data: {}, cleaned data: {}".format(raw_data[0].strip(), self.dataset[0]))
-        self.Xs = [[_[0]] for _ in self.dataset]
-        self.Ys =  [_[1] for _ in self.dataset]
+        import pandas as pd
+        
+        self.dataframe = pd.read_csv(StringIO(self.DATA_FILE))
+        
+        print("Total of {} rows in the dataset!".format(len(self.dataframe)))
         # go to the next step
         self.next(self.check_dataset)
 
@@ -78,20 +69,20 @@ class MyRegressionFlow(FlowSpec):
         """
         Check data is ok before training starts
         """
-        assert(all(y < 100 and y > -100 for y in self.Ys))
+        #assert(all(y < 100 and y > -100 for y in self.Ys))
+        assert(True)
         self.next(self.prepare_train_and_test_dataset)
 
     @step
     def prepare_train_and_test_dataset(self):
-        from sklearn.model_selection import train_test_split
-
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-            self.Xs, 
-            self.Ys, 
-            test_size=self.TEST_SPLIT, 
-            random_state=42
-            )
-
+        self.dataframe.Date = pd.to_datetime(dataframe.Date)
+        self.dataframe = dataframe.set_index('Date')
+        self.dataframe = dataframe.sort_index()
+        # Shift Volatility by 1 week as this the the target we will be predicting
+        self.dataframe['Volatility'] = self.dataframe.Volatility.shift(1)
+        self.dataframe = self.dataframe.iloc[1: , :]
+        self.train, self.test = self.dataframe[0:1700], self.dataframe[1700:]
+        # TODO impute empty values
         self.next(self.train_model)
 
     @step
@@ -99,11 +90,10 @@ class MyRegressionFlow(FlowSpec):
         """
         Train a regression on the training set
         """
-        from sklearn import linear_model
-
-        reg = linear_model.LinearRegression()
+        from sklearn.ensemble import RandomForestRegressor
+        self.X_train = self.train 
+        reg = RandomForestRegressor(n_estimators=100)
         reg.fit(self.X_train, self.y_train)
-        print("Coefficient {}, intercept {}".format(reg.coef_[0], reg.intercept_))
         # now, make sure the model is available downstream
         self.model = reg
         # go to the testing phase
@@ -114,7 +104,7 @@ class MyRegressionFlow(FlowSpec):
         """
         Test the model on the hold out sample
         """
-        from sklearn import metrics
+        from sklearn.ensemble import metrics
 
         self.y_predicted = self.model.predict(self.X_test)
         self.mse = metrics.mean_squared_error(self.y_test, self.y_predicted)
@@ -133,4 +123,4 @@ class MyRegressionFlow(FlowSpec):
 
 
 if __name__ == '__main__':
-    MyRegressionFlow()
+    VolatilityPredictionFlow()
