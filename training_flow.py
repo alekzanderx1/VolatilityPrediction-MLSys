@@ -70,15 +70,18 @@ class VolatilityPredictionFlow(FlowSpec):
         Check data is ok before training starts
         """
         #assert(all(y < 100 and y > -100 for y in self.Ys))
+        # TODO Implement checks on Data Later
         assert(True)
         self.next(self.prepare_train_and_test_dataset)
 
     @step
     def prepare_train_and_test_dataset(self):
+        import pandas as pd
+        
         # Set Date as Index
-        self.dataframe.Date = pd.to_datetime(dataframe.Date)
-        self.dataframe = dataframe.set_index('Date')
-        self.dataframe = dataframe.sort_index()
+        self.dataframe.Date = pd.to_datetime(self.dataframe.Date)
+        self.dataframe = self.dataframe.set_index('Date')
+        self.dataframe = self.dataframe.sort_index()
         # Shift Volatility forward by 1 week as this the the target we will be predicting
         self.dataframe['Volatility'] = self.dataframe.Volatility.shift(1)
         self.dataframe = self.dataframe.iloc[1: , :]
@@ -96,7 +99,7 @@ class VolatilityPredictionFlow(FlowSpec):
     @step
     def train_walk_forward_validation(self):
         """
-        Train a regression on the training set
+        Train a regression model on train set and predict on test set in a walk forward fashion
         """
         from sklearn.ensemble import RandomForestRegressor
         from numpy import asarray
@@ -123,7 +126,7 @@ class VolatilityPredictionFlow(FlowSpec):
             # store forecast in list of predictions
             predictions.append(yhat)
             # add actual observation to history for the next loop
-            history.append(test.iloc[i].values)
+            history.append(self.test.iloc[i].values)
             # summarize progress
             print('>expected=%.1f, predicted=%.1f' % (testy, yhat))            
         
