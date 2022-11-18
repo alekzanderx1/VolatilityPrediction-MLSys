@@ -78,6 +78,15 @@ class VolatilityPredictionFlow(FlowSpec):
     def prepare_train_and_test_dataset(self):
         import pandas as pd
         
+        def value_to_float(x):
+            if type(x) == float or type(x) == int:
+                return x
+            if 'M' in x:
+                if len(x) > 1:
+                    return float(x.replace('M', '')) * 1000000
+                return 1000000.0
+            return 0.0
+        
         # Set Date as Index
         self.dataframe.Date = pd.to_datetime(self.dataframe.Date)
         self.dataframe = self.dataframe.set_index('Date')
@@ -89,7 +98,11 @@ class VolatilityPredictionFlow(FlowSpec):
         volatility_column = self.dataframe.pop('Volatility')
         self.dataframe.insert(len(self.dataframe.columns),"Volatility",volatility_column)
         # TODO impute NaN values
-        # TODO convert Mcap to float
+        self.dataframe = self.dataframe.dropna()
+        # Convert Mcap to float
+        self.dataframe['Mcap'] = self.dataframe['Mcap'].apply(value_to_float) 
+        
+        # TODO scale the values in each column
         
         # spilit into train and test sets
         self.train, self.test = self.dataframe[0:1600], self.dataframe[1600:]
@@ -110,7 +123,7 @@ class VolatilityPredictionFlow(FlowSpec):
             # split into input and output columns
             trainX, trainy = train[:, :-1], train[:, -1]
             # fit model
-            model = RandomForestRegressor(n_estimators=10)
+            model = RandomForestRegressor(n_estimators=30)
             model.fit(trainX, trainy)
             # make a one-step prediction
             yhat = model.predict([testX])
@@ -139,7 +152,7 @@ class VolatilityPredictionFlow(FlowSpec):
         """
         Calculate resulting metrics from predictions 
         """
-        from sklearn.ensemble import metrics
+        from sklearn import metrics
 
         self.r2 = metrics.r2_score(self.test['Volatility'], self.y_predicted)
         print('R2 score is {}'.format(self.r2))
