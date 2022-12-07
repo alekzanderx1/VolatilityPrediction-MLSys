@@ -29,12 +29,12 @@ class VolatilityPredictionFlow(FlowSpec):
         'dataset',
         help='Text file with the dataset',
         is_text=True,
-        default='csv_dataset.csv')
+        default='final.csv')
 
     TEST_SPLIT = Parameter(
         name='test_split',
         help='Determining the split of the dataset for testing',
-        default=0.20
+        default=0.30
     )
 
     @step
@@ -56,27 +56,31 @@ class VolatilityPredictionFlow(FlowSpec):
         Read the data in from the static file
         """
         import pandas as pd
+        from io import StringIO
         
-        self.df = pd.read_csv("final.csv")
+        self.df = pd.read_csv(StringIO(self.DATA_FILE))
         self.df.set_index('Date', inplace = True)
-        
-        self.next(self.check_dataset)
-
-    @step
-    def check_dataset(self):
-        """
-        Check data is ok before training starts
-        """
-        #assert(all(y < 100 and y > -100 for y in self.Ys))
-        # TODO Implement checks on Data Later
-        assert(True)
-        self.next(self.prepare_train_and_test_dataset)
+        self.df = self.df.sort_index()
+        self.next(self.clean_transform_dataset)
     
     @step
-    def process_data(self) -> None:
+    def clean_transform_dataset(self) -> None:
         """
         Manipulate the dataframe to fill missing rows and split in two seperate dataframes
         """
+        def value_to_float(x):
+            if type(x) == float or type(x) == int:
+                return x
+            if 'M' in x:
+                if len(x) > 1:
+                    return float(x.replace('M', '')) * 1000000
+                return 1000000.0
+            return 0.0
+
+        # Fix datatype for Mcap column
+        self.df['Mcap'] = self.df['Mcap'].apply(value_to_float) 
+
+        # TODO: Normalize all values
 
         #creating two different dataframes for volatility and excess returns
         self.vol_df = self.df.copy()
@@ -101,15 +105,22 @@ class VolatilityPredictionFlow(FlowSpec):
         self.ret_df.dropna(subset = ['Mkt_rf'], inplace = True)
 
         #adding lagged variables based on 
-        self.ret_df['Mkt_rf_shifted'] = self.ret_df['Mkt_df'].shift(1)
+        self.ret_df['Mkt_rf_shifted'] = self.ret_df['Mkt_rf'].shift(1)
 
         #forward fill all the rows
         self.ret_df.ffill(inplace = True)
 
         #drop all the rows with NA
         self.ret_df.dropna(inplace = True)
+        
+        
+        # Shift both Volatility and Excess Return back by 1 week since our target is the value for next week
+        self.vol_df['Volatility'] = self.vol_df.Volatility.shift(-1)
+        self.ret_df['Mkt_rf'] = self.vol_df.Mkt_rf.shift(-1)
+        self.vol_df.dropna(inplace = True)
+        self.ret_df.dropna(inplace = True)
 
-        #split the dataframes in X and y dataframes
+        # split the dataframes in X and y dataframes
         vol_col = [x for x in self.vol_df.keys() if x != 'Volatility']
         self.vol_df_X = self.vol_df[vol_col]
         self.vol_df_y = self.vol_df['Volatility']
@@ -118,6 +129,16 @@ class VolatilityPredictionFlow(FlowSpec):
         self.ret_df_X = self.ret_df[ret_col]
         self.ret_df_y = self.ret_df['Mkt_rf']
 
+        self.next(self.check_dataset)
+        
+    @step
+    def check_dataset(self):
+        """
+        Check data is ok before training starts
+        """
+        #assert(all(y < 100 and y > -100 for y in self.Ys))
+        # TODO Implement checks on Data Later
+        assert(True)
         self.next(self.train_test_split)
 
     @step
@@ -127,64 +148,126 @@ class VolatilityPredictionFlow(FlowSpec):
         len_train_vol = round(len(self.vol_df)*0.7)
         len_train_ret = round(len(self.ret_df)*0.7)
         
+        # Train Test split for Volatility dataset
         self.vol_train_X, self.vol_test_X = self.vol_df_X[:len_train_vol], self.vol_df_X[len_train_vol:]
         self.vol_train_y, self.vol_test_y = self.vol_df_y[:len_train_vol], self.vol_df_y[len_train_vol:]
         
+        # Train Test split for Market Return dataset
         self.ret_train_X, self.ret_test_X = self.ret_df_X[:len_train_ret], self.ret_df_X[len_train_ret:]
         self.ret_train_y, self.ret_test_y = self.ret_df_y[:len_train_ret], self.ret_df_y[len_train_ret:]
 
-        self.next(self.train_walk_forward_validation)
-        
+        self.pipeline_types = ['VolatilityPrediction','ExcessReturnPrediction']
+        self.next(self.begin_prediction_pipeline, foreach="pipeline_types")
 
     @step
-    def train_walk_forward_validation(self):
+    def begin_prediction_pipeline(self):
+        self.pipeline_type = self.input
+        print(f'Beginning {self.pipeline_type} Pipeline')
+
+        # Choose Train and Test dataset to pass on based on choice of Pipeline
+        if self.pipeline_type == 'VolatilityPrediction':
+            self.X_train = self.vol_train_X
+            self.y_train = self.vol_train_y
+            self.X_test = self.vol_test_X
+            self.y_test = self.vol_test_y
+        else:
+            self.X_train = self.ret_train_X
+            self.y_train = self.ret_train_y
+            self.X_test = self.ret_test_X
+            self.y_test = self.ret_test_y 
+
+        self.classifier_types = ['RandomForest','ElasticNet']
+        self.next(self.train_with_walk_forward_validation, foreach="classifier_types")
+
+    @step
+    def train_with_walk_forward_validation(self):
         """
-        Train a regression model on train set and predict on test set in a walk forward fashion
+        Train a Regression model on train set and predict on test set in a walk forward fashion
         """
         from sklearn.ensemble import RandomForestRegressor
+        from sklearn.linear_model import ElasticNet
         from numpy import asarray
         
-        def random_forest_forecast(train, testX):
+        self.classifier_type = self.input
+                
+        def random_forest_forecast(X_train, y_train, testX):
             # transform list into array
-            train = asarray(train)
-            # split into input and output columns
-            trainX, trainy = train[:, :-1], train[:, -1]
+            trainX = asarray(X_train)
+            trainy = asarray(y_train)
+
             # fit model
             model = RandomForestRegressor(n_estimators=30)
             model.fit(trainX, trainy)
+            
+            # make a one-step prediction
+            yhat = model.predict([testX])
+            return yhat[0]
+
+        def elasticnet_forecast(X_train, y_train, testX):
+            # transform list into array
+            trainX = asarray(X_train)
+            trainy = asarray(y_train)
+            
+            # fit model
+            model = ElasticNet()
+            model.fit(trainX, trainy)
+
             # make a one-step prediction
             yhat = model.predict([testX])
             return yhat[0]
         
         predictions = list()
-        history = [x for x in self.train.values]
+        history_X = [x for x in self.X_train.values]
+        history_Y = [y for y in self.y_train.values]
         
-        for i in range(len(self.test)):
-            testX, testy = self.test.iloc[i].values[:-1], self.test.iloc[i].values[-1]
+        for i in range(len(self.X_test)):
+            testX = self.X_test.iloc[i].values
+            testY = self.y_test.iloc[i]
             # fit model on history and make a prediction
-            yhat = random_forest_forecast(history, testX)
+            if self.classifier_type == 'RandomForest':
+                yhat = random_forest_forecast(history_X, history_Y, testX)
+            else:
+                yhat = elasticnet_forecast(history_X, history_Y, testX)
+
             # store forecast in list of predictions
             predictions.append(yhat)
             # add actual observation to history for the next loop
-            history.append(self.test.iloc[i].values)
-            # summarize progress
-            print('>expected=%.1f, predicted=%.1f' % (testy, yhat))            
+            history_X.append(self.X_test.iloc[i].values)     
+            history_Y.append(self.y_test.iloc[i])    
         
         self.y_predicted = predictions
-        # go to the testing phase
-        self.next(self.evaluate_results)
+        # go to the evaluation phase
+        self.next(self.evaluate_classifier)  
 
-    @step 
-    def evaluate_results(self):
+    @step
+    def evaluate_classifier(self):
         """
-        Calculate resulting metrics from predictions 
+        Calculate resulting metrics from predictions for given classifier
         """
         from sklearn import metrics
 
-        self.r2 = metrics.r2_score(self.test['Volatility'], self.y_predicted)
+        self.r2 = metrics.r2_score(self.y_test, self.y_predicted)
         print('R2 score is {}'.format(self.r2))
-        # all is done go to the end
+
+        self.next(self.evaluate_pipeline)
+
+    @step
+    def evaluate_pipeline(self, inputs):
+        # combine results from both algorithms 
+        # print and store results and best model/params
+        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2'])
+        for clf in inputs:
+            print(f" {clf.classifier_type} Classifier's R2 score {clf.r2} for {self.pipeline_type} Pipeline")
+
+        self.next(self.combine_pipeline_results)
+
+
+    @step
+    def combine_pipeline_results(self, inputs):
+        # Store results and best model in artifacts to use in Flask app
+        print('Pipelines joined!')
         self.next(self.end)
+
 
     @step
     def end(self):
