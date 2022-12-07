@@ -163,7 +163,7 @@ class VolatilityPredictionFlow(FlowSpec):
             self.X_train = self.ret_train_X
             self.y_train = self.ret_train_y
             self.X_test = self.ret_test_X
-            self.y_test = self.ret_test_y 
+            self.y_test = self.ret_test_y
 
         # Train and evaluate dataset on each of the below algorithms
         self.classifier_types = ['RandomForest','ElasticNet']
@@ -196,6 +196,10 @@ class VolatilityPredictionFlow(FlowSpec):
             history_Y.append(self.y_test.iloc[i])    
         
         self.y_predicted = predictions
+        if self.classifier_type == 'RandomForest':
+            self.model = models.fit_random_forest_classifier(history_X, history_Y)
+        else:
+            self.model = models.fit_elasticnet_classifier(history_X, history_Y)
         
         # go to the evaluation phase
         self.next(self.evaluate_classifier)  
@@ -227,11 +231,17 @@ class VolatilityPredictionFlow(FlowSpec):
 
     @step
     def evaluate_pipeline(self, inputs):
-        # combine results from both algorithms 
+        # Merge all common artifacts
+        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','model'])
+
         # print and store results and best model/params
-        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2'])
         for clf in inputs:
             print(f" {clf.classifier_type} Classifier's R2 score {clf.r2} for {self.pipeline_type} Pipeline")
+
+        best_model = max(inputs, key=lambda x: x.r2)
+        self.best_r2 = best_model.r2
+        self.best_classifier = best_model.classifier_type
+        self.best_model = best_model.model
 
         self.next(self.combine_and_save_pipeline_results)
 
@@ -239,6 +249,20 @@ class VolatilityPredictionFlow(FlowSpec):
     @step
     def combine_and_save_pipeline_results(self, inputs):
         # Store results and best model in artifacts to use in Flask app
+        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','best_r2','best_classifier','pipeline_type','X_train','X_test','y_train','y_test','best_model','model','vol_train_y', 'vol_test_y', 'ret_train_y', 'ret_test_y'])
+        for pipelineResult in inputs:
+            # Store best model and results for Volatility prediction
+            if pipelineResult.pipeline_type == 'VolatilityPrediction':
+                self.vol_best_r2 = pipelineResult.best_r2
+                self.vol_best_model_type = pipelineResult.best_classifier
+                self.vol_best_model = pipelineResult.best_model
+
+            # Store best model and results for Market Return prediction
+            else:
+                self.er_best_r2 = pipelineResult.best_r2
+                self.er_best_model_type = pipelineResult.best_classifier
+                self.er_best_model = pipelineResult.best_model
+
         print('Pipelines joined!')
         self.next(self.end)
 
