@@ -8,6 +8,8 @@ MAKE SURE TO RUN THIS WITH METAFLOW LOCAL FIRST
 from metaflow import FlowSpec, step, Parameter, IncludeFile, current
 from datetime import datetime
 import os
+from dag_utils import utils, models
+from comet_ml import Experiment
 
 
 # make sure we are running locally for this
@@ -30,12 +32,6 @@ class VolatilityPredictionFlow(FlowSpec):
         help='Text file with the dataset',
         is_text=True,
         default='final.csv')
-
-    TEST_SPLIT = Parameter(
-        name='test_split',
-        help='Determining the split of the dataset for testing',
-        default=0.30
-    )
 
     @step
     def start(self):
@@ -66,19 +62,11 @@ class VolatilityPredictionFlow(FlowSpec):
     @step
     def clean_transform_dataset(self) -> None:
         """
-        Manipulate the dataframe to fill missing rows and split in two seperate dataframes
+        Manipulate the dataframe to fix datatypes, fill missing rows and add any derived features
         """
-        def value_to_float(x):
-            if type(x) == float or type(x) == int:
-                return x
-            if 'M' in x:
-                if len(x) > 1:
-                    return float(x.replace('M', '')) * 1000000
-                return 1000000.0
-            return 0.0
 
         # Fix datatype for Mcap column
-        self.df['Mcap'] = self.df['Mcap'].apply(value_to_float) 
+        self.df['Mcap'] = self.df['Mcap'].apply(utils.value_to_float) 
 
         # TODO: Normalize all values
 
@@ -120,6 +108,21 @@ class VolatilityPredictionFlow(FlowSpec):
         self.vol_df.dropna(inplace = True)
         self.ret_df.dropna(inplace = True)
 
+        self.next(self.check_dataset)
+        
+    @step
+    def check_dataset(self):
+        """
+        Check data is ok before training starts
+        """
+        assert(self.vol_df.isnull().any().any() == False)
+        assert(self.ret_df.isnull().any().any() == False)
+        self.next(self.train_test_split)
+
+    @step
+    def train_test_split(self):
+        import pandas as pd
+
         # split the dataframes in X and y dataframes
         vol_col = [x for x in self.vol_df.keys() if x != 'Volatility']
         self.vol_df_X = self.vol_df[vol_col]
@@ -128,23 +131,8 @@ class VolatilityPredictionFlow(FlowSpec):
         ret_col = [x for x in self.ret_df.keys() if x != 'Mkt_rf']
         self.ret_df_X = self.ret_df[ret_col]
         self.ret_df_y = self.ret_df['Mkt_rf']
-
-        self.next(self.check_dataset)
         
-    @step
-    def check_dataset(self):
-        """
-        Check data is ok before training starts
-        """
-        #assert(all(y < 100 and y > -100 for y in self.Ys))
-        # TODO Implement checks on Data Later
-        assert(True)
-        self.next(self.train_test_split)
-
-    @step
-    def train_test_split(self):
-        import pandas as pd
-        
+        # Train and Test Split lengths
         len_train_vol = round(len(self.vol_df)*0.7)
         len_train_ret = round(len(self.ret_df)*0.7)
         
@@ -156,6 +144,7 @@ class VolatilityPredictionFlow(FlowSpec):
         self.ret_train_X, self.ret_test_X = self.ret_df_X[:len_train_ret], self.ret_df_X[len_train_ret:]
         self.ret_train_y, self.ret_test_y = self.ret_df_y[:len_train_ret], self.ret_df_y[len_train_ret:]
 
+        # Now invoke a sub-dag for each type of prediction task
         self.pipeline_types = ['VolatilityPrediction','ExcessReturnPrediction']
         self.next(self.begin_prediction_pipeline, foreach="pipeline_types")
 
@@ -176,6 +165,7 @@ class VolatilityPredictionFlow(FlowSpec):
             self.X_test = self.ret_test_X
             self.y_test = self.ret_test_y 
 
+        # Train and evaluate dataset on each of the below algorithms
         self.classifier_types = ['RandomForest','ElasticNet']
         self.next(self.train_with_walk_forward_validation, foreach="classifier_types")
 
@@ -183,39 +173,9 @@ class VolatilityPredictionFlow(FlowSpec):
     def train_with_walk_forward_validation(self):
         """
         Train a Regression model on train set and predict on test set in a walk forward fashion
-        """
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.linear_model import ElasticNet
-        from numpy import asarray
-        
+        """        
         self.classifier_type = self.input
                 
-        def random_forest_forecast(X_train, y_train, testX):
-            # transform list into array
-            trainX = asarray(X_train)
-            trainy = asarray(y_train)
-
-            # fit model
-            model = RandomForestRegressor(n_estimators=30)
-            model.fit(trainX, trainy)
-            
-            # make a one-step prediction
-            yhat = model.predict([testX])
-            return yhat[0]
-
-        def elasticnet_forecast(X_train, y_train, testX):
-            # transform list into array
-            trainX = asarray(X_train)
-            trainy = asarray(y_train)
-            
-            # fit model
-            model = ElasticNet()
-            model.fit(trainX, trainy)
-
-            # make a one-step prediction
-            yhat = model.predict([testX])
-            return yhat[0]
-        
         predictions = list()
         history_X = [x for x in self.X_train.values]
         history_Y = [y for y in self.y_train.values]
@@ -225,9 +185,9 @@ class VolatilityPredictionFlow(FlowSpec):
             testY = self.y_test.iloc[i]
             # fit model on history and make a prediction
             if self.classifier_type == 'RandomForest':
-                yhat = random_forest_forecast(history_X, history_Y, testX)
+                yhat = models.random_forest_forecast(history_X, history_Y, testX)
             else:
-                yhat = elasticnet_forecast(history_X, history_Y, testX)
+                yhat = models.elasticnet_forecast(history_X, history_Y, testX)
 
             # store forecast in list of predictions
             predictions.append(yhat)
@@ -236,6 +196,7 @@ class VolatilityPredictionFlow(FlowSpec):
             history_Y.append(self.y_test.iloc[i])    
         
         self.y_predicted = predictions
+        
         # go to the evaluation phase
         self.next(self.evaluate_classifier)  
 
@@ -246,8 +207,21 @@ class VolatilityPredictionFlow(FlowSpec):
         """
         from sklearn import metrics
 
+        # Create an experiment with your api key
+        experiment = Experiment(
+            api_key="utAEwSyzdABdikKjhUItXWeFQ",
+            project_name="finalproject-volatilityandexcessreturn",
+            workspace="nyu-fre-7773-2021",
+        )
+        experiment.add_tag("Pipeline:" + str(self.pipeline_type))
+        experiment.add_tag("Model:" + str(self.classifier_type))
+
         self.r2 = metrics.r2_score(self.y_test, self.y_predicted)
         print('R2 score is {}'.format(self.r2))
+        
+        #experiment.log_parameters({"max_depth":})
+        experiment.log_metrics({"r2": self.r2})
+
 
         self.next(self.evaluate_pipeline)
 
@@ -259,11 +233,11 @@ class VolatilityPredictionFlow(FlowSpec):
         for clf in inputs:
             print(f" {clf.classifier_type} Classifier's R2 score {clf.r2} for {self.pipeline_type} Pipeline")
 
-        self.next(self.combine_pipeline_results)
+        self.next(self.combine_and_save_pipeline_results)
 
 
     @step
-    def combine_pipeline_results(self, inputs):
+    def combine_and_save_pipeline_results(self, inputs):
         # Store results and best model in artifacts to use in Flask app
         print('Pipelines joined!')
         self.next(self.end)
