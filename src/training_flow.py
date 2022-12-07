@@ -17,7 +17,7 @@ assert os.environ.get('METAFLOW_DEFAULT_DATASTORE', 'local') == 'local'
 assert os.environ.get('METAFLOW_DEFAULT_ENVIRONMENT', 'local') == 'local'
 
 
-class VolatilityPredictionFlow(FlowSpec):
+class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     """
     VolatilityPredictionFlow is a DAG reading data from a file 
     and training a Regression model successfully.
@@ -274,4 +274,4 @@ class VolatilityPredictionFlow(FlowSpec):
 
 
 if __name__ == '__main__':
-    VolatilityPredictionFlow()
+    VolatilityAndExcessReturnPredictionFlow()

@@ -46,7 +46,14 @@
 </script>
 <body>
 	<h1>{{ project }}</h1>
-	<h2> Model Performance indicating Fairness</h2>
+	<h2> Results for Volatility Prediction</h2>
+	<p>Best Classifier: {{vol_best_model_type}}</p>
+	<p>Classifier R2 score: {{vol_best_r2}}</p>
+	<h2> Results for Market Excess Return Prediction</h2>
+	<p>Best Classifier: {{er_best_model_type}}</p>
+	<p>Classifier R2 score: {{er_best_r2}}</p>
+	</br>
+	<h2>Make a prediction</h2>
 	<form id="myform" method="POST">
 		<label for="cars">Choose a Gender group:</label>
 		<select name="Genders" id="genders">
