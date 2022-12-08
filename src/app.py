@@ -3,11 +3,11 @@
 
 """
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify, Response
 import numpy as np
-from metaflow import Flow
-from metaflow import get_metadata, metadata
-from flask import jsonify
+from metaflow import Flow, get_metadata, metadata
+import uuid
+from time import time 
 
 #### THIS IS GLOBAL, SO OBJECTS LIKE THE MODEL CAN BE RE-USED ACROSS REQUESTS ####
 
@@ -52,9 +52,42 @@ def main():
       )
 
 
-@app.route('/predict',methods=['GET'])
+@app.route('/predict',methods=['POST'])
 def predict():
-  return jsonify({"hello":"hello"})
+  # on POST we make a prediction over the input text supplied by the user
+  if request.method=='POST':
+    start = time()
+    # Initialize variables 
+    eventId = str(uuid.uuid4())
+    result = dict()
+    result['data'] = dict()
+    result['metadata'] = dict()
+
+    # Read request parameter
+    request_data = request.get_json()
+
+    print(f"Request_data: {request_data}")
+    
+    # Perform prediction using latest model
+    val = latest_model.predict([[float(_x)]])
+    
+    #  debug
+    print(f" EventId: {eventId}, _x: {_x}, prediction: {val[0]}")
+    
+    # Contruct Response
+    result['data']['prediction'] = val[0]
+    result['metadata']['eventId'] = eventId
+    result['metadata']['serverTimestamp'] = int(time())
+    end = time()
+    result['metadata']['time'] = end - start
+    
+    # Returning the response to the client as JSON
+    return jsonify(result)
+  else:
+    return Response(
+        "Only POST Method allowed",
+        status=400,
+    )
 
     # # on POST we serve model test results to fronend to display
   # if request.method=='POST':

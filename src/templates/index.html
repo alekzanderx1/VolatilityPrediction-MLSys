@@ -9,12 +9,12 @@
     $(function() {
         $('#loadResults').click(function() {
             event.preventDefault();
-            var form_data = $( "#genders" ).val()
-            console.log(form_data);
+            var data = $('#myform').serializeArray();
+            console.log(JSON.stringify(data));
             $.ajax({
                 type: 'POST',
-                url: '/',
-                data: JSON.stringify({'gender':form_data}),
+                url: '/predict',
+                data: JSON.stringify(data),
                 dataType : 'json',
 				contentType: 'application/json',
 				success : (data) => {
@@ -55,13 +55,13 @@
 	</br>
 	<h2>Make a prediction</h2>
 	<form id="myform" method="POST">
-		<label for="cars">Choose a Gender group:</label>
-		<select name="Genders" id="genders">
-		  <option value="Male">Male</option>
-		  <option value="Female">Female</option>
-		  <option value="Other">Other</option>
-		  <option value="all">All</option>
+		<label for="pipelines">Choose the Prediction Target:</label>
+		<select name="PipelineType" id="pipelines">
+		  <option value="Volatility">Volatility</option>
+		  <option value="ExcessReturn">ExcessReturn</option>
 		</select>
+		<label for="lagValues">Lag Values(, separated)</label>
+  		<input type="text" id="lagValues" name="lagValues"><br>
 	</form>
 	</br>
 	<button id="loadResults">Load Results</button>
