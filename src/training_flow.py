@@ -4,34 +4,42 @@ MAKE SURE TO RUN THIS WITH METAFLOW LOCAL FIRST
 
 """
 
-
+import comet_ml
+from comet_ml import Experiment
 from metaflow import FlowSpec, step, Parameter, IncludeFile, current
 from datetime import datetime
 import os
 from dag_utils import utils, models
-from comet_ml import Experiment
 
+from comet_ml.integration.metaflow import comet_flow
+from sklearn.ensemble import RandomForestClassifier
+from sklearn import metrics
 
 # make sure we are running locally for this
 assert os.environ.get('METAFLOW_DEFAULT_DATASTORE', 'local') == 'local'
 assert os.environ.get('METAFLOW_DEFAULT_ENVIRONMENT', 'local') == 'local'
 
+os.environ['COMET_DISABLE_AUTO_LOGGING'] = '1'
+os.environ['COMET_API_KEY'] = "utAEwSyzdABdikKjhUItXWeFQ"
+os.environ['COMET_WORKSPACE'] = "nyu-fre-7773-2021"
 
+#@comet_flow(api_key="utAEwSyzdABdikKjhUItXWeFQ",project_name="Vol&RetPrediction",workspace="nyu-fre-7773-2021")
+@comet_flow(project_name="finalproject-volatilityandexcessreturn")
 class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     """
     VolatilityPredictionFlow is a DAG reading data from a file 
     and training a Regression model successfully.
     """
-    
+
     # if a static file is part of the flow, 
     # it can be called in any downstream process,
     # gets versioned etc.
     # https://docs.metaflow.org/metaflow/data#data-in-local-files
-    DATA_FILE = IncludeFile(
-        'dataset',
-        help='Text file with the dataset',
-        is_text=True,
-        default='final.csv')
+    # DATA_FILE = IncludeFile(
+    #     'dataset',
+    #     help='Text file with the dataset',
+    #     is_text=True,
+    #     default='final.csv')
 
     @step
     def start(self):
@@ -54,7 +62,8 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         import pandas as pd
         from io import StringIO
         
-        self.df = pd.read_csv(StringIO(self.DATA_FILE))
+        # self.df = pd.read_csv(StringIO(self.DATA_FILE))
+        self.df = pd.read_csv('final.csv')
         self.df.set_index('Date', inplace = True)
         self.df = self.df.sort_index()
         self.next(self.clean_transform_dataset)
@@ -64,9 +73,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         """
         Manipulate the dataframe to fix datatypes, fill missing rows and add any derived features
         """
-
-        # Fix datatype for Mcap column
-        self.df['Mcap'] = self.df['Mcap'].apply(utils.value_to_float) 
+        self.df['Mcap'] = self.df['Mcap'].apply(utils.value_to_float)
 
         # TODO: Normalize all values
 
@@ -164,17 +171,95 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
             self.y_train = self.ret_train_y
             self.X_test = self.ret_test_X
             self.y_test = self.ret_test_y
+        
+        #split the training data into training and validation sets
+        val_len = round(len(self.X_train)*0.7)
+        self.X_val, self.y_val = self.X_train, self.y_train
+        self.X_train, self.y_train = self.X_train[:val_len], self.y_train[:val_len]
 
         # Train and evaluate dataset on each of the below algorithms
         self.classifier_types = ['RandomForest','ElasticNet']
-        self.next(self.train_with_walk_forward_validation, foreach="classifier_types")
+        self.next(self.param_select, foreach="classifier_types")
 
     @step
-    def train_with_walk_forward_validation(self):
+    def param_select(self) -> None:
+        """
+        Uses metaflow parallelization to run models with different hyperparameters
+        """
+        self.classifier_type = self.input
+
+        if self.classifier_type == 'RandomForest':
+            self.param = [5,10,15]
+        else:
+            self.param = [0.5,1,1.5]
+        self.next(self.train_with_walk_forward_validation, foreach = "param")
+
+    @step
+    def train_with_walk_forward_validation(self) -> None:
+        """
+        Trains a random forest model on the training set and validates using walk forward validation
+        """
+        print(f"Starting {self.classifier_type}")
+
+        self.param = self.input
+        predictions = list()
+        self.real = list()
+        history_X = [x for x in self.X_train.values]
+        history_Y = [y for y in self.y_train.values]
+        
+        for i in range(len(self.X_test), len(self.X_val)):
+            
+            testX = self.X_val.iloc[i].values
+            
+            #store actual values in a list
+            testY = self.y_val.iloc[i]
+            self.real.append(testY)
+
+            # fit model on history and make a prediction
+            if self.classifier_type == 'RandomForest':
+                yhat = models.random_forest_forecast(history_X, history_Y, testX, self.param)
+            else:
+                yhat = models.elasticnet_forecast(history_X, history_Y, testX, self.param)
+            # store forecast in list of predictions
+            predictions.append(yhat)
+            # add actual observation to history for the next loop
+            history_X.append(self.X_val.iloc[i].values)     
+            history_Y.append(self.y_val.iloc[i])    
+        
+        self.y_predicted = predictions
+        
+        self.val_r2_score = metrics.r2_score(self.real, self.y_predicted)
+
+        
+        #log model param and score
+        self.comet_experiment.log_parameter("Param Value", self.param)
+        self.comet_experiment.log_metrics({"r2": self.val_r2_score})
+        
+        self.next(self.select_param)
+
+    @step
+    def select_param(self, inputs) -> None:
+        """
+        select the best model from hyperparameter tuning
+        """
+        #Merge all common artifacts
+        self.merge_artifacts(inputs, exclude=['y_predicted','val_r2_score', 'real', 'param'])
+        
+        #select the best model
+        self.best_model_param = max(inputs, key = lambda x: x.val_r2_score).param
+
+        print(f"Best R2 score for validation set: {max(inputs, key = lambda x: x.val_r2_score).val_r2_score}")
+        
+        self.next(self.test_with_walk_forward_validation)
+        
+    @step
+    def test_with_walk_forward_validation(self):
         """
         Train a Regression model on train set and predict on test set in a walk forward fashion
         """        
         self.classifier_type = self.input
+
+        print(f"Model: {self.classifier_type}: parameter: {self.best_model_param}")
                 
         predictions = list()
         history_X = [x for x in self.X_train.values]
@@ -185,9 +270,11 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
             testY = self.y_test.iloc[i]
             # fit model on history and make a prediction
             if self.classifier_type == 'RandomForest':
-                yhat = models.random_forest_forecast(history_X, history_Y, testX)
+                yhat = models.random_forest_forecast(history_X, history_Y, testX, self.best_model_param)
+            elif self.classifier_type == 'ElasticNet':
+                yhat = models.elasticnet_forecast(history_X, history_Y, testX, self.best_model_param)
             else:
-                yhat = models.elasticnet_forecast(history_X, history_Y, testX)
+                print("\n\n\nfndfdfndf\n\n\n")
 
             # store forecast in list of predictions
             predictions.append(yhat)
@@ -197,9 +284,9 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         
         self.y_predicted = predictions
         if self.classifier_type == 'RandomForest':
-            self.model = models.fit_random_forest_classifier(history_X, history_Y)
+            self.model = models.fit_random_forest_classifier(history_X, history_Y, self.best_model_param)
         else:
-            self.model = models.fit_elasticnet_classifier(history_X, history_Y)
+            self.model = models.fit_elasticnet_classifier(history_X, history_Y, self.best_model_param)
         
         # go to the evaluation phase
         self.next(self.evaluate_classifier)  
@@ -209,30 +296,21 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         """
         Calculate resulting metrics from predictions for given classifier
         """
-        from sklearn import metrics
 
-        # Create an experiment with your api key
-        experiment = Experiment(
-            api_key="utAEwSyzdABdikKjhUItXWeFQ",
-            project_name="finalproject-volatilityandexcessreturn",
-            workspace="nyu-fre-7773-2021",
-        )
-        experiment.add_tag("Pipeline:" + str(self.pipeline_type))
-        experiment.add_tag("Model:" + str(self.classifier_type))
+        self.comet_experiment.add_tag("Pipeline:" + str(self.pipeline_type))
+        self.comet_experiment.add_tag("Model:" + str(self.classifier_type))
 
         self.r2 = metrics.r2_score(self.y_test, self.y_predicted)
         print('R2 score is {}'.format(self.r2))
         
-        #experiment.log_parameters({"max_depth":})
-        experiment.log_metrics({"r2": self.r2})
-
+        self.comet_experiment.log_metrics({"r2": self.r2})
 
         self.next(self.evaluate_pipeline)
 
     @step
     def evaluate_pipeline(self, inputs):
         # Merge all common artifacts
-        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','model'])
+        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','model','best_model_param'])
 
         # print and store results and best model/params
         for clf in inputs:
@@ -242,6 +320,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.best_r2 = best_model.r2
         self.best_classifier = best_model.classifier_type
         self.best_model = best_model.model
+        self.best_param = best_model.best_model_param
 
         self.next(self.combine_and_save_pipeline_results)
 
@@ -249,19 +328,21 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     @step
     def combine_and_save_pipeline_results(self, inputs):
         # Store results and best model in artifacts to use in Flask app
-        self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','best_r2','best_classifier','pipeline_type','X_train','X_test','y_train','y_test','best_model','model','vol_train_y', 'vol_test_y', 'ret_train_y', 'ret_test_y'])
+        self.merge_artifacts(inputs, exclude=['best_param','y_val','X_val','y_predicted','classifier_type','r2','best_r2','best_classifier','pipeline_type','X_train','X_test','y_train','y_test','best_model','model','vol_train_y', 'vol_test_y', 'ret_train_y', 'ret_test_y'])
         for pipelineResult in inputs:
             # Store best model and results for Volatility prediction
             if pipelineResult.pipeline_type == 'VolatilityPrediction':
                 self.vol_best_r2 = pipelineResult.best_r2
                 self.vol_best_model_type = pipelineResult.best_classifier
                 self.vol_best_model = pipelineResult.best_model
+                self.vol_best_param = pipelineResult.best_param
 
             # Store best model and results for Market Return prediction
             else:
                 self.er_best_r2 = pipelineResult.best_r2
                 self.er_best_model_type = pipelineResult.best_classifier
                 self.er_best_model = pipelineResult.best_model
+                self.er_best_param = pipelineResult.best_param
 
         print('Pipelines joined!')
         self.next(self.end)
