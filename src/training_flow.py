@@ -11,7 +11,7 @@ from datetime import datetime
 import os
 from dag_utils import utils, models
 
-from comet_ml.integration.metaflow import comet_flow
+from comet_ml.integration.metaflow import comet_flow, comet_skip
 from sklearn.ensemble import RandomForestClassifier
 from sklearn import metrics
 
@@ -40,7 +40,8 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     #     help='Text file with the dataset',
     #     is_text=True,
     #     default='final.csv')
-
+    
+    @comet_skip
     @step
     def start(self):
         """
@@ -54,6 +55,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         print("username: %s" % current.username)
         self.next(self.load_data)
 
+    @comet_skip
     @step
     def load_data(self): 
         """
@@ -68,6 +70,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.df = self.df.sort_index()
         self.next(self.clean_transform_dataset)
     
+    @comet_skip
     @step
     def clean_transform_dataset(self) -> None:
         """
@@ -117,6 +120,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
 
         self.next(self.check_dataset)
         
+    @comet_skip
     @step
     def check_dataset(self):
         """
@@ -126,8 +130,12 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         assert(self.ret_df.isnull().any().any() == False)
         self.next(self.train_test_split)
 
+    @comet_skip
     @step
     def train_test_split(self):
+        """
+        Split the data into Train and Test sets
+        """
         import pandas as pd
 
         # split the dataframes in X and y dataframes
@@ -155,8 +163,12 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.pipeline_types = ['VolatilityPrediction','ExcessReturnPrediction']
         self.next(self.begin_prediction_pipeline, foreach="pipeline_types")
 
+    @comet_skip
     @step
     def begin_prediction_pipeline(self):
+        """
+        Begin sub-dag for either Volatility or Excess Return Prediction
+        """
         self.pipeline_type = self.input
         print(f'Beginning {self.pipeline_type} Pipeline')
 
@@ -181,6 +193,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.classifier_types = ['RandomForest','ElasticNet']
         self.next(self.param_select, foreach="classifier_types")
 
+    @comet_skip
     @step
     def param_select(self) -> None:
         """
@@ -197,7 +210,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     @step
     def train_with_walk_forward_validation(self) -> None:
         """
-        Trains a random forest model on the training set and validates using walk forward validation
+        Trains a regression model on the training set and validates using walk forward validation
         """
         print(f"Starting {self.classifier_type}")
 
@@ -210,9 +223,8 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         for i in range(len(self.X_test), len(self.X_val)):
             
             testX = self.X_val.iloc[i].values
-            
-            #store actual values in a list
             testY = self.y_val.iloc[i]
+            
             self.real.append(testY)
 
             # fit model on history and make a prediction
@@ -231,16 +243,19 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.val_r2_score = metrics.r2_score(self.real, self.y_predicted)
 
         
-        #log model param and score
+        # Log model param and score to Metaflow
+        self.comet_experiment.add_tag("Pipeline:" + str(self.pipeline_type))
+        self.comet_experiment.add_tag("Model:" + str(self.classifier_type))
         self.comet_experiment.log_parameter("Param Value", self.param)
         self.comet_experiment.log_metrics({"r2": self.val_r2_score})
         
         self.next(self.select_param)
 
+    @comet_skip
     @step
     def select_param(self, inputs) -> None:
         """
-        select the best model from hyperparameter tuning
+        Select the best model from hyperparameter tuning
         """
         #Merge all common artifacts
         self.merge_artifacts(inputs, exclude=['y_predicted','val_r2_score', 'real', 'param'])
@@ -252,6 +267,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         
         self.next(self.test_with_walk_forward_validation)
         
+    @comet_skip
     @step
     def test_with_walk_forward_validation(self):
         """
@@ -303,12 +319,18 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.r2 = metrics.r2_score(self.y_test, self.y_predicted)
         print('R2 score is {}'.format(self.r2))
         
+        self.comet_experiment.log_parameter("Param Value", self.best_model_param)
         self.comet_experiment.log_metrics({"r2": self.r2})
 
         self.next(self.evaluate_pipeline)
 
+    @comet_skip
     @step
     def evaluate_pipeline(self, inputs):
+        """
+        Choose the best performing model for this Prediction pipeline based on r2 score
+        """
+
         # Merge all common artifacts
         self.merge_artifacts(inputs, exclude=['y_predicted','classifier_type','r2','model','best_model_param'])
 
@@ -325,8 +347,12 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.next(self.combine_and_save_pipeline_results)
 
 
+    @comet_skip
     @step
     def combine_and_save_pipeline_results(self, inputs):
+        """
+        Store results from both prediction pipelines to be used by Flask
+        """
         # Store results and best model in artifacts to use in Flask app
         self.merge_artifacts(inputs, exclude=['best_param','y_val','X_val','y_predicted','classifier_type','r2','best_r2','best_classifier','pipeline_type','X_train','X_test','y_train','y_test','best_model','model','vol_train_y', 'vol_test_y', 'ret_train_y', 'ret_test_y'])
         for pipelineResult in inputs:
@@ -348,6 +374,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.next(self.end)
 
 
+    @comet_skip
     @step
     def end(self):
         # all done, just print goodbye

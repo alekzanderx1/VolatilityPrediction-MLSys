@@ -3,72 +3,195 @@
 <head>
 	<title>{{ project }} app</title>
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+		<!-- CSS only -->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
 </head>
 <script type="text/javascript">
 
     $(function() {
         $('#loadResults').click(function() {
             event.preventDefault();
-            var data = $('#myform').serializeArray();
-            console.log(JSON.stringify(data));
+		    var formData = {
+		      pipelineType: $("#pipelines").val(),
+		      lag: $("#lag").val(),
+		      spread: $("#spread").val(),
+		      mcap: $("#mcap").val(),
+		      pe: $("#pe").val(),
+		      pb: $("#pb").val(),
+		      close: $("#close").val(),
+		      yeild30: $("#yeild30").val(),
+		      aayeild: $("#aayeild").val(),
+		      mkt_rf: $("#mkt_rf").val(),
+		      volatility: $("#volatility").val(),
+		      smb: $("#smb").val(),
+		      hml: $("#hml").val(),
+		      rf: $("#rf").val(),
+		      yield: $("#yield").val(),
+		      m3: $("#m3").val(),
+		      inflation: $("#inflation").val()
+		    };
+            
             $.ajax({
                 type: 'POST',
                 url: '/predict',
-                data: JSON.stringify(data),
+                data: JSON.stringify(formData),
                 dataType : 'json',
 				contentType: 'application/json',
 				success : (data) => {
-					result1 = "Prediction Miss rate for Group: " + data.gender + " is " + data.groupMissRate 
-					result2 = ""
-					result3 = ""
-					diff = Math.abs(data.testMissRate - data.groupMissRate) 
-					if(data.gender != "all" ) {
-						result2 = "In comparision, Overall Miss Rate on test set is: " + data.testMissRate
-						if(diff < 0.2) {
-							result3 = "Hence, the models performance for this group seems fair."
-						} 
-						else if (diff > 0.2) {
-							result3 = "Hence, the models performance for this group seems unfair or slightly biased."
-						}
-					}
-					
+					result1 = "Prediction value: " + data.data.prediction
+					result2 = "Time taken to predict: " + data.metadata.time
 					$('#result1').text(result1);
 					$('#result2').text(result2);
-					$('#result3').text(result3);
 				},
 				error : (data) => {
-					alert('error!');
+					alert('Error in prediction!');
 				}
             });
         });
     }); 
 
+    function onSelectChange(answer) {
+    	if (answer == 'Volatility') {
+		 	document.getElementById('vol').style.display = "none";
+		 	document.getElementById('idMkt_rf').style.display = "block";
+		} else {
+			document.getElementById('vol').style.display = "block";
+			document.getElementById('idMkt_rf').style.display = "none";
+		}
+	}
+
 </script>
 <body>
-	<h1>{{ project }}</h1>
-	<h2> Results for Volatility Prediction</h2>
-	<p>Best Classifier: {{vol_best_model_type}}</p>
-	<p>Classifier R2 score: {{vol_best_r2}}</p>
-	<h2> Results for Market Excess Return Prediction</h2>
-	<p>Best Classifier: {{er_best_model_type}}</p>
-	<p>Classifier R2 score: {{er_best_r2}}</p>
-	</br>
-	<h2>Make a prediction</h2>
-	<form id="myform" method="POST">
-		<label for="pipelines">Choose the Prediction Target:</label>
-		<select name="PipelineType" id="pipelines">
-		  <option value="Volatility">Volatility</option>
-		  <option value="ExcessReturn">ExcessReturn</option>
-		</select>
-		<label for="lagValues">Lag Values(, separated)</label>
-  		<input type="text" id="lagValues" name="lagValues"><br>
-	</form>
-	</br>
-	<button id="loadResults">Load Results</button>
-	</br>
-	</br>
-	<h2 id="result1"></h2>
-	<p id="result2"></p>
-	<p id="result3"></p>
+	<div class="container">
+	  <div class="row">
+	    <div class="col">
+	    </div>
+	    <div class="col-8">
+		  	<div class="page-header">
+		    	<h1 class="display-2 text-center" >{{ project }}</h1>      
+		  	</div>
+
+			<div class="card">
+			  <div class="card-body">
+			    <h5 class="card-title">Results for Volatility Prediction</h5>
+				<p class="card-text">Best Classifier: {{vol_best_model_type}}</p>
+				<p class="card-text">Classifier R2 score: {{vol_best_r2}}</p>
+				<p class="card-text">Classifier Best Hyperparamater Value: {{vol_best_param}}</p>
+			  </div>
+			</div>
+
+			<div class="card">
+			  <div class="card-body">
+			    <h5 class="card-title">Results for Market Excess Return Prediction</h5>
+				<p class="card-text">Best Classifier: {{er_best_model_type}}</p>
+				<p class="card-text">Classifier R2 score: {{er_best_r2}}</p>
+				<p class="card-text">Classifier Best Hyperparamater Value: {{er_best_param}}</p>
+			  </div>
+			</div>
+
+			</br>
+			<h2>Make a prediction</h2>
+			<form id="myform" method="POST">
+				
+				<div class="mb-3">
+				<label for="pipelines" class="form-label">Choose the Prediction Target:</label>
+				<select  class="form-select" name="PipelineType" id="pipelines"  onchange="onSelectChange(this.value)">
+				  <option value="">Please select</option>
+				  <option value="Volatility">Volatility</option>
+				  <option value="ExcessReturn">ExcessReturn</option>
+				</select>
+      			</div>
+
+      			<div class="mb-3">
+				<label for="lag" class="form-label">Lag Values (, separated)</label>
+		  		<input type="text" id="lag" name="lag" class="form-control"><br>
+				</div>
+
+      			<div class="mb-3">				
+				<label for="spread" class="form-label">Spread</label>
+		  		<input type="text" id="spread" name="spread" class="form-control"><br>
+		  		</div>
+
+      			<div class="mb-3">				
+				<label for="mcap" class="form-label">MCap</label>
+		  		<input type="number" id="mcap" name="mcap" class="form-control"><br>
+				</div>
+
+				<div class="mb-3">
+				<label for="pb" class="form-label">P/B</label>
+		  		<input type="number" id="pb" name="pb" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="pe" class="form-label">P/E</label>
+		  		<input type="number" id="pe" name="pe" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="close" class="form-label">Close</label>
+		  		<input type="number" id="close" name="close" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="yeild30" class="form-label">30Y Yield</label>
+		  		<input type="number" id="yeild30" name="yeild30" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="aayeild" class="form-label">AA Yield</label>
+		  		<input type="number" id="aayeild" name="aayeild" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3" id="idMkt_rf">
+		 		<label for="mkt_rf" class="form-label">MKT_RF</label>
+		  		<input type="number" id="mkt_rf" name="mkt_rf" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3" id="vol">
+		 		<label for="volatility" class="form-label">Volatility</label>
+		  		<input type="number" id="volatility" name="volatility" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="smb" class="form-label">SMB</label>
+		  		<input type="number" id="smb" name="smb" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="hml" class="form-label">HML</label>
+		  		<input type="number" id="hml" name="hml" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="rf" class="form-label">RF</label>
+		  		<input type="number" id="rf" name="rf" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="yield" class="form-label">Yield</label>
+		  		<input type="number" id="yield" name="yield" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="m3" class="form-label">3M</label>
+		  		<input type="number" id="m3" name="m3" class="form-control"><br>
+		 		</div>
+
+		 		<div class="mb-3">
+		 		<label for="inflation" class="form-label">Inflation</label>
+		  		<input type="number" id="inflation" name="inflation" class="form-control"><br>
+		  		</div>
+			</form>
+			</br>
+			<button id="loadResults" class="btn btn-primary btn-block mb-4">Load Results</button>
+			</br>
+			</br>
+			<h2 id="result1"></h2>
+			<p id="result2"></p>
+	    </div>
+	    <div class="col">
+	    </div>
+	  </div>
+	</div>
 </body>
 </html>

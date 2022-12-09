@@ -30,9 +30,11 @@ latest_run = get_latest_successful_run(FLOW_NAME)
 vol_best_r2 = latest_run.data.vol_best_r2
 vol_best_model_type = latest_run.data.vol_best_model_type
 vol_best_model = latest_run.data.vol_best_model
+vol_best_param = latest_run.data.vol_best_param
 er_best_r2 = latest_run.data.er_best_r2
 er_best_model_type = latest_run.data.er_best_model_type
 er_best_model = latest_run.data.er_best_model
+er_best_param = latest_run.data.er_best_param
 
 
 # We need to initialise the Flask object to run the flask app 
@@ -47,9 +49,49 @@ def main():
       project=PROJECT_NAME, 
       vol_best_r2=vol_best_r2, 
       vol_best_model_type=vol_best_model_type,
+      vol_best_param=vol_best_param,
       er_best_r2=er_best_r2,
-      er_best_model_type=er_best_model_type
+      er_best_model_type=er_best_model_type,
+      er_best_param=er_best_param
       )
+  else:
+    return Response(
+        "Only POST Method allowed",
+        status=400,
+    )
+
+@app.route('/results',methods=['GET'])
+def results():
+  # on GET we return model traning results and summary  
+  if request.method=='GET':
+    start = time()
+    # Initialize variables 
+    eventId = str(uuid.uuid4())
+    result = dict()
+    result['data'] = dict()
+    result['metadata'] = dict()
+    
+    # Debug
+    print(f" EventId: {eventId}, Request Type: GET /results")
+
+    # Prepare results
+    result['data']['vol_best_r2'] = vol_best_r2
+    result['data']['vol_best_model_type'] = vol_best_model_type
+    result['data']['vol_best_param'] = vol_best_param
+    result['data']['er_best_r2'] = er_best_r2
+    result['data']['er_best_model_type'] = er_best_model_type
+    result['data']['er_best_param'] = er_best_param
+    result['metadata']['eventId'] = eventId
+    result['metadata']['serverTimestamp'] = int(time())
+    end = time()
+    result['metadata']['time'] = end - start
+
+    return jsonify(result)
+  else:
+    return Response(
+        "Only POST Method allowed",
+        status=400,
+    )
 
 
 @app.route('/predict',methods=['POST'])
@@ -67,12 +109,45 @@ def predict():
     request_data = request.get_json()
 
     print(f"Request_data: {request_data}")
-    
+
+    # read values
+    pipelineType = request_data['pipelineType']
+    spread = float(request_data['spread'])
+    mcap = float(request_data['mcap'])
+    pe = float(request_data['pe'])
+    pb = float(request_data['pb'])
+    close = float(request_data['close'])
+    yeild30 = float(request_data['yeild30'])
+    aayeild = float(request_data['aayeild'])
+    smb = float(request_data['smb'])
+    hml = float(request_data['hml'])
+    rf = float(request_data['rf'])
+    yield_val = float(request_data['yield'])
+    m3 = float(request_data['m3'])
+    inflation = float(request_data['inflation'])
+    lagValues = request_data['lag']
+
+    if pipelineType == 'Volatility':
+      mkt_rf = float(request_data['mkt_rf'])
+    else:
+      volatility = float(request_data['volatility'])
+
+    # Create Input for algorithm
+
     # Perform prediction using latest model
-    val = latest_model.predict([[float(_x)]])
+    if pipelineType == 'Volatility':
+      input1 = [spread,mcap,pb,pe,close,yeild30,aayeild,mkt_rf,smb,hml,rf,yield_val,m3,inflation]
+      input2 = [float(x) for x in lagValues.split(',')]
+      xTest = input1 + input2
+      val = vol_best_model.predict([xTest])
+    else:
+      input1 = [spread,mcap,pb,pe,close,volatility, yeild30,aayeild,smb,hml,rf,yield_val,m3,inflation]
+      input2 = float(lagValues)
+      input1.append(input2)
+      val = er_best_model.predict([input1])
     
     #  debug
-    print(f" EventId: {eventId}, _x: {_x}, prediction: {val[0]}")
+    print(f" EventId: {eventId}, prediction: {val[0]}")
     
     # Contruct Response
     result['data']['prediction'] = val[0]
@@ -88,18 +163,6 @@ def predict():
         "Only POST Method allowed",
         status=400,
     )
-
-    # # on POST we serve model test results to fronend to display
-  # if request.method=='POST':
-  #   request_data = request.get_json()
-  #   gender = request_data['gender']
-  #   #  debug
-  #   print(gender)
-  #   # Returning the response to the client
-  #   missRateResponse = overAllMissRate
-  #   if(gender in ['Male','Female','Other']):
-  #       missRateResponse = genderStats[gender]
-  #   return jsonify({"gender":gender, "testMissRate":overAllMissRate,"groupMissRate":missRateResponse})
     
 
 if __name__=='__main__':
