@@ -6,3 +6,4 @@ numpy>=1,<2
 jupyterlab>=3,<4
 matplotlib>=3,<4
 comet-ml==3.31.19
+statsmodels==0.13.5
