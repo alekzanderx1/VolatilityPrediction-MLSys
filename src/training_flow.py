@@ -27,13 +27,11 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     
     @comet_skip
     @step
-    def start(self):
+    def start(self) -> None:
         """
         Start up and print out some info to make sure everything is ok metaflow-side
         """
         print("Starting up at {}".format(datetime.utcnow()))
-        # debug printing - this is from https://docs.metaflow.org/metaflow/tagging
-        # to show how information about the current run can be accessed programmatically
         print("flow name: %s" % current.flow_name)
         print("run id: %s" % current.run_id)
         print("username: %s" % current.username)
@@ -251,7 +249,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         
     @comet_skip
     @step
-    def test_with_walk_forward_validation(self):
+    def test_with_walk_forward_validation(self) -> None:
         """
         Train a Regression model on train set and predict on test set in a walk forward fashion
         """        
@@ -290,7 +288,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         self.next(self.evaluate_classifier)  
 
     @step
-    def evaluate_classifier(self):
+    def evaluate_classifier(self) -> None:
         """
         Calculate resulting metrics from predictions for given classifier
         """
@@ -331,7 +329,7 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
 
     @comet_skip
     @step
-    def combine_and_save_pipeline_results(self, inputs):
+    def combine_and_save_pipeline_results(self, inputs) -> None:
         """
         Store results from both prediction pipelines to be used by Flask
         """
