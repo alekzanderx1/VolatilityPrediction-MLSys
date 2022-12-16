@@ -4,6 +4,8 @@ Repository containing code and documentation for Final project for Machine Learn
 
 Goal is to build two kind of regression models, one for Volatility Prediction and one for Market Excess Return prediction. These in turn can be used to perform portfolio allocation.
 
+The models are trained, deployed, and served on the cloud using AWS EC2. 
+
 ## Data Description
 
 Data manually obtained through Bloomberg. 
@@ -14,9 +16,10 @@ Features are based on paper titled *Machine learning portfolio allocation* by *M
 ## Project Structure
 
 * `src` is the folder containing the scripts for Metaflow and Flask apps
+* `src/dag_utils` is a custom package built to be used in metaflow pipeline
 * `Data` folde contains all the data, cleaned or  uncleaned used during various stages of the project
-* `notebooks` folder contains Jupter notebooks used to perform EDA and Data Cleaning
-* `requirements.txt` file contains all Python libraries required to run the project, can be installed using pip. 
+* `notebooks` folder contains Jupyter notebooks used to perform EDA and experimental Model Training
+* `requirements.txt` file contains all Python libraries required to run the project, can be installed using pip
 
 ## Intructions to run pipeline locally
 
