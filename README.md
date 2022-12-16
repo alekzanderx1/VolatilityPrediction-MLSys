@@ -17,16 +17,18 @@ Features are based on paper titled *Machine learning portfolio allocation* by *M
 
 * `src` is the folder containing the scripts for Metaflow and Flask apps
 * `src/dag_utils` is a custom package built to be used in metaflow pipeline
-* `Data` folde contains all the data, cleaned or  uncleaned used during various stages of the project
+* `Data` folder contains all the data, cleaned or uncleaned used during various stages of the project
 * `notebooks` folder contains Jupyter notebooks used to perform EDA and experimental Model Training
 * `requirements.txt` file contains all Python libraries required to run the project, can be installed using pip
 
 ## Intructions to run pipeline locally
 
-* Install requirements using `pip install -r requirements.txt` and then goto `src` folder
+* Install requirements using `pip install -r requirements.txt` and then goto `src` folder using `cd src`
 * Run metaflow dag using `python training_flow.py run` 
 * Confirm location of Metaflow artifacts from logs, and update it in `app.py` line 18.
 * Launch Flask App using `python app.py`
+
+> Note: Running step 2 i.e. training_flow.py can take 20-30 minutes to finish execution due to large amount of models being trained
 
 The flask app should be available at http://127.0.0.1:5000/
 
@@ -41,6 +43,8 @@ Then follow below steps to launch the application:
 * Launch Flask app using `FLASK_APP=app.py flask run --host=0.0.0.0 --port=8080`
 * Press Ctrl B and press D on your keyboard to leave the tmux session running in the background.
 * To stop the session or make changes you can login to Tmux session again using  `tmux attach -t FlaskApp`
+
+While the app is running, it should be available at Public IP of your EC2 instance at port 8080.
 
 
 

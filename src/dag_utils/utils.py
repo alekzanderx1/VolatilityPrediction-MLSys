@@ -1,3 +1,4 @@
+# Helper function to convert number strings(ex 1.5M) into float or int datatype
 def value_to_float(x):
     if type(x) == float or type(x) == int:
         return x

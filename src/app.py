@@ -1,5 +1,9 @@
 """
-    This script runs a small Flask app that displays a simple web form for users to see Classification Model results.
+    This script runs a small Flask app that displays a web page showing Volatility and Market Return Prediction
+    Results and allows user to make predictions using the trained models using a HTML Form
+
+    App also provides two endpoint GET /results and POST /predictions 
+    through which user can bypass the UI entirely if required
 
 """
 
@@ -41,6 +45,7 @@ er_best_param = latest_run.data.er_best_param
 # By assigning parameters as static folder name,templates folder name
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
+# Homepage endpoint
 @app.route('/',methods=['GET'])
 def main():
   # on GET we display the homepage  
@@ -56,10 +61,11 @@ def main():
       )
   else:
     return Response(
-        "Only POST Method allowed",
+        "Only GET Method allowed",
         status=400,
     )
 
+# Results endpoint
 @app.route('/results',methods=['GET'])
 def results():
   # on GET we return model traning results and summary  
@@ -89,11 +95,11 @@ def results():
     return jsonify(result)
   else:
     return Response(
-        "Only POST Method allowed",
+        "Only GET Method allowed",
         status=400,
     )
 
-
+# Predictions endpoint
 @app.route('/predict',methods=['POST'])
 def predict():
   # on POST we make a prediction over the input text supplied by the user

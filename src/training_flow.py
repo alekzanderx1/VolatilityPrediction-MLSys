@@ -1,9 +1,3 @@
-"""
-
-MAKE SURE TO RUN THIS WITH METAFLOW LOCAL FIRST
-
-"""
-
 import comet_ml
 from comet_ml import Experiment
 from metaflow import FlowSpec, step, Parameter, IncludeFile, current
@@ -19,27 +13,17 @@ from sklearn import metrics
 assert os.environ.get('METAFLOW_DEFAULT_DATASTORE', 'local') == 'local'
 assert os.environ.get('METAFLOW_DEFAULT_ENVIRONMENT', 'local') == 'local'
 
+# CometML setup
 os.environ['COMET_DISABLE_AUTO_LOGGING'] = '1'
-os.environ['COMET_API_KEY'] = "utAEwSyzdABdikKjhUItXWeFQ"
-os.environ['COMET_WORKSPACE'] = "nyu-fre-7773-2021"
+os.environ['COMET_API_KEY'] = "your-key-here"
+os.environ['COMET_WORKSPACE'] = "your-workspace-here"
 
-#@comet_flow(api_key="utAEwSyzdABdikKjhUItXWeFQ",project_name="Vol&RetPrediction",workspace="nyu-fre-7773-2021")
 @comet_flow(project_name="finalproject-volatilityandexcessreturn")
 class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
     """
-    VolatilityPredictionFlow is a DAG reading data from a file 
-    and training a Regression model successfully.
+    VolatilityAndExcessReturnPredictionFlow is a DAG reading data from a file 
+    and training a two Regression models successfully.
     """
-
-    # if a static file is part of the flow, 
-    # it can be called in any downstream process,
-    # gets versioned etc.
-    # https://docs.metaflow.org/metaflow/data#data-in-local-files
-    # DATA_FILE = IncludeFile(
-    #     'dataset',
-    #     help='Text file with the dataset',
-    #     is_text=True,
-    #     default='final.csv')
     
     @comet_skip
     @step
@@ -77,8 +61,6 @@ class VolatilityAndExcessReturnPredictionFlow(FlowSpec):
         Manipulate the dataframe to fix datatypes, fill missing rows and add any derived features
         """
         self.df['Mcap'] = self.df['Mcap'].apply(utils.value_to_float)
-
-        # TODO: Normalize all values
 
         #creating two different dataframes for volatility and excess returns
         self.vol_df = self.df.copy()
