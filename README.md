@@ -24,6 +24,7 @@ Features are based on paper titled *Machine learning portfolio allocation* by *M
 ## Intructions to run pipeline locally
 
 * Install requirements using `pip install -r requirements.txt` and then goto `src` folder using `cd src`
+* Update `training_flow.py` with your CometML credentials
 * Run metaflow dag using `python training_flow.py run` 
 * Confirm location of Metaflow artifacts from logs, and update it in `app.py` line 18.
 * Launch Flask App using `python app.py`
@@ -38,7 +39,7 @@ Follow instructions as given [here](https://www.twilio.com/blog/deploy-flask-pyt
 
 Then follow below steps to launch the application:
 
-* Follow first three steps from [above section](#intructions-to-run-pipeline-locally)
+* Follow first four steps from [above section](#intructions-to-run-pipeline-locally)
 * Launch tmux session using `tmux new -s FlaskApp` 
 * Launch Flask app using `FLASK_APP=app.py flask run --host=0.0.0.0 --port=8080`
 * Press Ctrl B and press D on your keyboard to leave the tmux session running in the background.
